@@ -1,0 +1,23 @@
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Document</title>
+</head>
+<body>
+	<script>
+		
+		async function f() {
+
+		  try {
+		    let response = await fetch('https://5f591fbc8040620016ab8e0b.mockapi.io/api/resource1');
+		    console.log(response);
+		  } catch(err) {
+		    alert(err); // TypeError: failed to fetch
+		  }
+		}
+
+		f();
+	</script>
+</body>
+</html>
