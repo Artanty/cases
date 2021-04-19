@@ -1,0 +1,142 @@
+Dockerfile
+
+# Set the base image for subsequent instructions
+FROM php:7.4-fpm
+
+# Update packages
+RUN apt-get update
+
+# Install PHP and composer dependencies
+RUN apt-get install -qq git curl libmcrypt-dev libjpeg-dev libpng-dev libfreetype6-dev libbz2-dev zlib1g-dev libzip-dev libpq-dev
+
+# Clear out the local repository of retrieved package files
+RUN apt-get clean
+
+# Install needed extensions
+# Here you can install any other extension that you need during the test and deployment process
+#RUN docker-php-ext-install mcrypt pdo_mysql zip
+RUN docker-php-ext-install zip pdo_pgsql
+
+# Copy project inside container
+ADD . .
+
+# Install Composer
+RUN curl --silent --show-error https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+# Install Laravel Envoy
+#RUN composer global require "laravel/envoy=~1.0"
+RUN composer install
+
+# Migrate database
+CMD ["php", "artisan", "migrate", "--seed", "--force"]
+
+
+
+
+
+
+ANOTHER FILE
+.gitlab-ci.yml
+
+stages:
+  - build
+  - deploy
+
+services:
+  - docker:19.03.12-dind
+
+build:
+  image: docker:dind
+  stage: build
+  tags:
+    - build
+  variables:
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - docker build -t username/projectname:$CI_PIPELINE_ID .
+    - docker login --username username -p $DOCKERHUB_TOKEN
+    - docker push username/projectname:$CI_PIPELINE_ID
+
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  tags:
+    - build
+  script:
+    - mv config .kube/
+    - sed -i "s/IMAGE_VERSION/$CI_PIPELINE_ID/" .kube/projectname-depl.yaml
+    - kubectl apply -f .kube/projectname-depl.yaml
+    - POD=$(kubectl get pods --selector=tier=frontend --output=jsonpath={.items..metadata.name})
+    - sleep 30
+    - kubectl logs $POD
+  #dependencies:
+  #  - build
+  #when: on_success
+
+
+
+  ANOTHER FILE
+  projectname-depl.yaml
+
+
+  apiVersion: apps/v1beta2 # for versions before 1.9.0 use apps/v1beta2
+  kind: Deployment
+  metadata:
+    name: projectname
+    labels:
+      app: projectname
+    namespace: projectname
+  spec:
+    selector:
+      matchLabels:
+        app: projectname
+        tier: frontend
+    # replicas: 1
+    # strategy:
+    #   type: RollingUpdate
+    #   rollingUpdate:
+    #     maxSurge: 1        # how many pods we can add at a time
+    #     maxUnavailable: 0  # maxUnavailable define how many pods can be unavailable
+    #                        # during the rolling update
+    template:
+      metadata:
+        labels:
+          app: projectname
+          tier: frontend
+      spec:
+        imagePullSecrets:
+        - name: regcred
+        containers:
+        - image: username/projectname:IMAGE_VERSION
+          name: projectname
+          resources:
+            requests:
+              memory: "1024Mi"
+              cpu: "500m"
+            limits:
+              memory: "3072Mi"
+              cpu: "3"
+          env:
+          - name: DB_HOST
+            value: projectname-postgres
+          - name: DB_PORT
+            value: "5432"
+          - name: DB_DATABASE
+            value: postgresdb
+          - name: DB_USERNAME
+            value: postgresadmin
+          - name: DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: postgres-pass          # generated before in secret.yml
+                key: password
+          ports:
+          - containerPort: 80
+            name: projectname
+          lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/sh", "-c", "php artisan migrate --seed --force"]
+        nodeSelector:
+          tier: production
